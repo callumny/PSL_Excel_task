@@ -1,0 +1,220 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Dec  1 22:35:15 2022
+
+@author: callum_williams
+"""
+
+import numpy as np
+import pandas as pd
+import datetime
+from dateutil.relativedelta import relativedelta
+import matplotlib.pyplot as plt
+from scipy.optimize import curve_fit
+
+
+#import data from excel document, copy and pasted relevant data across to new sheets called XXX_1 for data to be read more easily
+
+raw_data = pd.read_excel('/Users/callum_williams/Desktop/PSL Interview - Shared Appreciation Mortgages - Callum Williams.xlsx','RawData_1')
+hpi = pd.read_excel('/Users/callum_williams/Desktop/PSL Interview - Shared Appreciation Mortgages - Callum Williams.xlsx','HPI_1')
+raw_data.fillna(0)
+
+#%%
+#Q1
+
+ltv = raw_data['Loan Amount']/raw_data['Initial Property Valuation']
+
+median = ltv.median()
+print('1. LTV median:',median)
+
+#%%
+#Q2
+
+raw1 = raw_data.sort_values('Property Valuation Date') #sorted by property valuation date, oldest to newest
+raw1 = raw1.reset_index()
+
+modern_hp = 294559
+
+def av_house(date):
+    date_new = date.date() 
+    start_date = datetime.date(1990,1,1)
+
+    years = date_new.year - start_date.year
+    months = date_new.month - start_date.month
+    
+    total_months = years*12 + months
+    x = hpi['Avg. House Price, GBP'][total_months]
+
+    return x
+
+#current property value
+current_property_value = []
+ratios = []
+hpi_old = []
+
+for i in range(len(raw1)):
+    old_price = raw1['Initial Property Valuation'][i]
+    date = raw1['Property Valuation Date'][i]
+
+    av_hpi = av_house(date)
+    ratio = old_price/av_hpi
+    
+    ratios.append(ratio)
+    hpi_old.append(av_hpi)
+
+
+raw1['Original HPI'] = hpi_old
+raw1['Relative to HPI'] = ratios
+raw1['Current Property Value'] = raw1['Relative to HPI'] * modern_hp
+
+raw1 = raw1.sort_values('index')
+raw1 = raw1.reset_index()
+
+#current valuation prices stored in list called 'current_property_value'
+
+#%%
+#Q3 functions
+#assumptions made: average male will live to 79, average female will live to 83 years old based off of 2018-2020 data 
+
+raw1.replace({pd.NaT: None}, inplace=True)
+
+def end1_func(num):
+    if np.asarray(raw1['Sex of 1st Borrower'])[num] == 'M':
+        date1 = raw1['Birthdate of 1st Borrower'][num]
+        end_1 = date1.date() + relativedelta(years=79)
+    
+    else:
+        date1 = raw1['Birthdate of 1st Borrower'][num]
+        end_1 = date1.date() + relativedelta(years=83)
+        
+    return end_1
+
+def end2_func(num):
+    if (np.asarray(raw1['Sex of 2nd Borrower'])[num] == 'M'):
+        if (np.asarray(raw1['Birthdate of 2nd Borrower'])[num] == None):
+            end_2 = datetime.date(1900,1,1)
+        
+        else:
+                                                       
+            date2 = raw1['Birthdate of 2nd Borrower'][num]
+            #print(date2,num,raw1['Sex of 2nd Borrower'][num])
+            end_2 = date2.date() + relativedelta(years=79)
+    
+    if (np.asarray(raw1['Sex of 2nd Borrower'])[num] == 'F'):
+        if (np.asarray(raw1['Birthdate of 2nd Borrower'])[num] == None):
+            end_2 = datetime.date(1900,1,1)
+        else:
+            date2 = raw1['Birthdate of 2nd Borrower'][num]
+            end_2 = date2.date() + relativedelta(years=83)
+        
+    else:
+        end_2 = datetime.date(1900,1,1)
+    
+    return end_2
+
+def compare(end1,end2):
+    if end1 >= end2:
+        return end1
+    
+    else:
+        return end2
+#%%
+#Q3 execution    
+expiration_dates = []
+
+for i in range(len(raw1)):
+    
+    end1 = end1_func(i)
+    end2 = end2_func(i)
+    
+    final = compare(end1,end2)
+    expiration_dates.append(final)
+    
+raw1['Expiration Date'] = expiration_dates
+
+raw1.loc[raw1['Expiration Date'] < datetime.date(2023,1,1), 'Expiration Date'] = datetime.date(2023,1,1)
+raw1 = raw1.sort_values('index')
+#raw1 = raw1.reset_index()
+   
+#expiration dates for the borrowers are listed in the array 'expiration_dates'
+
+#%%
+#Q4
+plt.close()
+
+x = np.linspace(1990,2022.75,393)
+y = hpi['Avg. House Price, GBP']
+
+def f(x, A, B): # this is your 'straight line' y=f(x)
+    return A*x + B
+
+popt, pcov = curve_fit(f, x, y) # your data x, y to fit
+
+#plotting fitted house price against time, and extrapolating until the end of the last maturation date
+new_x = np.linspace(1990,2060,840)
+y1 = new_x*popt[0] + popt[1]
+#plt.plot(new_x,y1,c='purple')
+#plt.xlabel('Year')
+#plt.ylabel('Average House Price')
+#plt.show()
+
+valuations_at_maturity = []
+
+for i in range(len(raw1)):
+    date = raw1['Expiration Date'][i]
+    #date_new = date.date() 
+    start_date = datetime.date(1990,1,1)
+
+    years = date.year - start_date.year
+    months = date.month - start_date.month
+    
+    total_months = years*12 + months
+
+    x_input = 1990 + total_months/12
+    
+    new_av_price = f(x_input,popt[0],popt[1])
+    valuations_at_maturity.append(new_av_price)
+    
+raw1['HPI at Maturity'] = valuations_at_maturity
+
+raw1['Valuation at Maturity'] = raw1['HPI at Maturity'] * raw1['Relative to HPI']
+
+raw1['Appreciation'] = raw1['Valuation at Maturity'] - raw1['Initial Property Valuation']
+
+raw1['LTV'] = ltv
+
+raw1['Total loan repayment'] = raw1['Appreciation']*raw1['LTV'] + raw1['Loan Amount']
+
+#%%
+#Q5 
+
+# Pros: Short term good loan as houseprice won't increase drastically (in a non-volatile market) and your down payment is esentially future earnings
+# Cons: Over a long term period you 'miss out' on large % of the appreciation of your property, which could be used for future investment
+
+#%%
+#Q6
+#Discounted cash flows
+
+raw1['Expiration Date'] = pd.to_datetime(raw1['Expiration Date']) 
+
+result = raw1.groupby(raw1['Expiration Date'].dt.to_period("Y"))['Total loan repayment'].sum()
+
+def discount_cash_flow(revenue,discount,year):
+    cf = revenue / (1 + discount)**year
+    return cf
+
+total_discounted_rev = []
+
+for i in range(len(result)):
+    cf = discount_cash_flow(np.array(result)[i],0.05,i)
+    total_discounted_rev.append(cf)
+    
+discounted_portfolio = sum(total_discounted_rev)
+
+print('Discounted portfolio price:',discounted_portfolio)
+
+#total discounted portfolio price is ~95million, using at 5% discount rate, was decided that the discount rate would be lower than publically listed companies ~10%
+    
+
+    
