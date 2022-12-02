@@ -184,7 +184,7 @@ raw1['Appreciation'] = raw1['Valuation at Maturity'] - raw1['Initial Property Va
 
 raw1['LTV'] = ltv
 
-raw1['Total loan repayment'] = raw1['Appreciation']*raw1['LTV'] + raw1['Loan Amount']
+raw1['Total loan repayment'] = 3*raw1['Appreciation']*raw1['LTV'] + raw1['Loan Amount']
 
 #%%
 #Q5 
